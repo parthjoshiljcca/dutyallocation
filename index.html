@@ -1,0 +1,1113 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Practical Duty Allocator · GU BCA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{
+  --paper:#FBF8FA; --sheet:#FFFFFF; --ink:#1D2240; --ink-soft:#5A5F7D;
+  --omr:#B3306B; --omr-soft:#F6E3EC; --rule:#EAD3DF; --ok:#0F7A6C; --ok-soft:#DDF1EC;
+  --warn:#A65A00; --warn-soft:#FBEBD6; --field:#FFFFFF; --shadow:0 1px 0 rgba(29,34,64,.06);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#15172A; --sheet:#1E2137; --ink:#ECEAF4; --ink-soft:#A8ABC6;
+    --omr:#E86A9F; --omr-soft:#3A2236; --rule:#3A3550; --ok:#4CC7B2; --ok-soft:#173A36;
+    --warn:#F0A955; --warn-soft:#3B2C18; --field:#181A2E; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#15172A; --sheet:#1E2137; --ink:#ECEAF4; --ink-soft:#A8ABC6;
+  --omr:#E86A9F; --omr-soft:#3A2236; --rule:#3A3550; --ok:#4CC7B2; --ok-soft:#173A36;
+  --warn:#F0A955; --warn-soft:#3B2C18; --field:#181A2E; color-scheme: dark;
+}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:"Bricolage Grotesque","Atkinson Hyperlegible",system-ui,sans-serif;line-height:1.1;margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--omr);outline-offset:2px;border-radius:6px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 18px}
+
+/* Masthead */
+.mast{padding:34px 0 26px;border-bottom:1px solid var(--rule)}
+.mast-top{display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--ink-soft);font-size:.92rem}
+.mast h1{font-size:clamp(2.1rem,7vw,3.6rem);font-weight:800;letter-spacing:-.02em;margin-top:18px}
+.mast p{max-width:60ch;color:var(--ink-soft);margin:12px 0 0;font-size:1.05rem}
+.theme-btn{border:1px solid var(--rule);background:var(--sheet);border-radius:999px;padding:6px 12px;cursor:pointer;font-size:.88rem}
+
+/* OMR answer-sheet rail */
+.rail{display:flex;gap:6px;margin:22px 0 0;flex-wrap:wrap}
+.bub{display:flex;align-items:center;gap:8px;padding:6px 12px 6px 6px;border-radius:999px;background:var(--sheet);border:1px solid var(--rule);font-size:.9rem;color:var(--ink-soft);cursor:pointer}
+.bub i{width:26px;height:26px;border-radius:50%;border:2px solid var(--omr);display:grid;place-items:center;font-style:normal;font-weight:700;font-size:.8rem;color:var(--omr);transition:background .25s,color .25s}
+.bub.done i{background:var(--omr);color:#fff}
+.bub.done{color:var(--ink)}
+
+/* Steps */
+.step{display:grid;grid-template-columns:56px 1fr;gap:0 18px;padding:34px 0;border-bottom:1px solid var(--rule)}
+.step-no{width:46px;height:46px;border-radius:50%;border:2.5px solid var(--omr);display:grid;place-items:center;font-family:"Bricolage Grotesque",sans-serif;font-weight:800;font-size:1.25rem;color:var(--omr);transition:background .3s,color .3s}
+.step.done .step-no{background:var(--omr);color:#fff}
+.step h2{font-size:1.55rem;font-weight:700;margin-top:8px}
+.step .lead{color:var(--ink-soft);margin:6px 0 18px;max-width:62ch}
+.step-body{min-width:0}
+
+.drop{display:block;position:relative;border:2px dashed var(--rule);border-radius:16px;background:var(--sheet);padding:26px 20px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s}
+.drop:hover,.drop.over{border-color:var(--omr);background:var(--omr-soft)}
+.drop strong{display:block;font-size:1.08rem}
+.drop span{color:var(--ink-soft);font-size:.92rem}
+.drop input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.row-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+.link-btn{background:none;border:none;color:var(--omr);font-weight:700;cursor:pointer;padding:6px 2px;text-decoration:underline;text-underline-offset:3px}
+.status{margin-top:14px;padding:12px 14px;border-radius:12px;font-size:.95rem;display:none}
+.status.show{display:block}
+.status.ok{background:var(--ok-soft);color:var(--ok)}
+.status.err{background:var(--warn-soft);color:var(--warn)}
+
+/* Tabs */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--rule);margin-bottom:16px;overflow-x:auto}
+.tab{background:none;border:none;padding:10px 14px;cursor:pointer;color:var(--ink-soft);font-weight:700;border-bottom:3px solid transparent;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--omr)}
+.panel[hidden]{display:none}
+
+.tbl-wrap{overflow-x:auto;border:1px solid var(--rule);border-radius:14px;background:var(--sheet)}
+table{border-collapse:collapse;width:100%;font-size:.93rem}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--rule);vertical-align:middle}
+th{font-weight:700;color:var(--ink-soft);font-size:.85rem;background:var(--paper);position:sticky;top:0}
+tr:last-child td{border-bottom:none}
+td input[type=number]{width:84px}
+input[type=text],input[type=number],input[type=search],input[type=date],select,textarea{background:var(--field);border:1px solid var(--rule);border-radius:10px;padding:8px 10px;min-height:40px;width:100%}
+textarea{min-height:110px;resize:vertical}
+.chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.78rem;font-weight:700;background:var(--omr-soft);color:var(--omr);white-space:nowrap;margin:1px 2px 1px 0}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:999px;overflow:hidden}
+.seg button{border:none;background:none;padding:5px 11px;cursor:pointer;font-size:.82rem;font-weight:700;color:var(--ink-soft)}
+.seg button[aria-pressed="true"]{background:var(--omr);color:#fff}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.toolbar input[type=search]{flex:1 1 220px;width:auto}
+.muted{color:var(--ink-soft);font-size:.9rem}
+
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px 18px}
+.field label{display:block;font-weight:700;font-size:.9rem;margin-bottom:5px}
+.field small{display:block;color:var(--ink-soft);font-size:.82rem;margin-top:4px}
+fieldset{border:1px solid var(--rule);border-radius:14px;padding:16px;margin:0 0 16px;background:var(--sheet)}
+legend{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;padding:0 6px}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:.95rem}
+.check input{width:20px;height:20px;margin-top:2px;accent-color:var(--omr)}
+
+.primary{background:var(--omr);color:#fff;border:none;border-radius:999px;padding:14px 26px;font-weight:700;font-size:1.05rem;cursor:pointer;min-height:48px}
+.primary:disabled{opacity:.45;cursor:not-allowed}
+.secondary{background:var(--sheet);color:var(--ink);border:1.5px solid var(--ink);border-radius:999px;padding:11px 20px;font-weight:700;cursor:pointer;min-height:44px}
+.secondary:disabled{opacity:.45;cursor:not-allowed}
+.small-btn{background:none;border:1px solid var(--rule);border-radius:999px;padding:4px 11px;font-size:.82rem;font-weight:700;cursor:pointer;color:var(--omr)}
+
+/* Results */
+.tally{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--rule);border-radius:16px;background:var(--sheet);overflow:hidden;margin-bottom:18px}
+.tally div{flex:1 1 50%;padding:14px 16px;border-right:1px solid var(--rule);border-bottom:1px solid var(--rule);margin:0 -1px -1px 0}
+@media (min-width:700px){.tally div{flex-basis:25%}}
+.tally b{display:block;font-family:"Bricolage Grotesque",sans-serif;font-size:1.7rem;font-weight:800}
+.tally span{color:var(--ink-soft);font-size:.86rem}
+.downloads{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 22px}
+.warnbox{background:var(--warn-soft);color:var(--warn);border-radius:14px;padding:14px 16px;margin-bottom:18px;font-size:.93rem}
+.warnbox ul{margin:6px 0 0;padding-left:20px}
+.okbox{background:var(--ok-soft);color:var(--ok);border-radius:14px;padding:14px 16px;margin-bottom:18px;font-size:.95rem;font-weight:700}
+.day-h{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:1.1rem;margin:22px 0 10px}
+.ex{display:block;line-height:1.35}
+.ex small{color:var(--ink-soft)}
+.empty{color:var(--ink-soft);font-style:italic}
+
+/* Loader: an OMR sheet being marked */
+#loader{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:var(--paper);transition:opacity .45s ease,visibility .45s}
+#loader.gone{opacity:0;visibility:hidden}
+.ld-card{text-align:center;padding:28px 30px 24px;background:var(--sheet);border:1px solid var(--rule);border-radius:20px;box-shadow:0 18px 50px -24px rgba(179,48,107,.35);min-width:260px}
+.ld-grid{display:grid;grid-template-columns:auto repeat(4,26px);gap:10px 12px;align-items:center;justify-content:center;margin:0 auto 20px}
+.ld-grid b{font-family:"Bricolage Grotesque",sans-serif;font-size:.85rem;color:var(--ink-soft);text-align:right;padding-right:4px}
+.ld-b{width:26px;height:26px;border-radius:50%;border:2px solid var(--omr);position:relative;display:grid;place-items:center;font-size:.68rem;font-weight:700;color:var(--omr)}
+.ld-b.f::after{content:"";position:absolute;inset:2px;border-radius:50%;background:var(--omr);transform:scale(0);animation:ldfill 2.6s cubic-bezier(.3,1.4,.5,1) infinite;animation-delay:var(--d)}
+@keyframes ldfill{0%,8%{transform:scale(0)}20%,78%{transform:scale(1)}92%,100%{transform:scale(0)}}
+.ld-t{font-family:"Bricolage Grotesque",sans-serif;font-weight:800;font-size:1.35rem;margin:0}
+.ld-s{color:var(--ink-soft);font-size:.92rem;margin:4px 0 0}
+.ld-bar{height:4px;border-radius:4px;background:var(--omr-soft);margin-top:16px;overflow:hidden}
+.ld-bar i{display:block;height:100%;width:40%;background:var(--omr);border-radius:4px;animation:ldbar 1.3s ease-in-out infinite}
+@keyframes ldbar{0%{transform:translateX(-110%)}100%{transform:translateX(260%)}}
+@media (prefers-reduced-motion:reduce){.ld-b.f::after{animation:none;transform:scale(1)}.ld-bar i{animation:none;width:100%}}
+/* Edit sheet */
+.sheet-bg{position:fixed;inset:0;z-index:40;background:rgba(20,22,40,.5);display:flex;align-items:flex-end;justify-content:center}
+.sheet-bg[hidden]{display:none}
+.sheet{background:var(--sheet);width:100%;max-width:620px;max-height:90vh;overflow:auto;border-radius:22px 22px 0 0;padding:20px 18px calc(18px + env(safe-area-inset-bottom,0px));box-shadow:0 -10px 40px rgba(0,0,0,.2)}
+@media (min-width:700px){.sheet-bg{align-items:center}.sheet{border-radius:22px}}
+.sheet h3{font-size:1.3rem;margin-bottom:2px}
+.seat{display:grid;grid-template-columns:96px 1fr auto;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid var(--rule)}
+.seat select{min-width:0}
+.seat .why{grid-column:1/-1;font-size:.82rem;color:var(--warn)}
+.danger{background:none;border:1.5px solid var(--warn);color:var(--warn);border-radius:999px;padding:9px 16px;font-weight:700;cursor:pointer}
+.row-btns{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.cancelled td{opacity:.55}
+.cancelled td strong{text-decoration:line-through}
+@media (max-width:480px){.seat{grid-template-columns:1fr auto}.seat .role{grid-column:1/-1}}
+footer{padding:34px 0 46px;color:var(--ink-soft);font-size:.92rem;text-align:center}
+footer strong{color:var(--ink)}
+
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--paper);padding:12px 18px;border-radius:12px;font-size:.95rem;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;max-width:calc(100% - 32px);z-index:20}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.busy{display:none;margin-left:10px;color:var(--ink-soft)}
+.busy.show{display:inline}
+
+@media (max-width:640px){
+  .step{grid-template-columns:1fr;gap:12px 0;padding:28px 0}
+  .step-no{width:40px;height:40px;font-size:1.1rem}
+  .mast{padding-top:24px}
+  th,td{padding:9px 10px}
+  .primary{width:100%}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="loader" role="status" aria-live="polite" aria-label="Loading the duty allocator">
+  <div class="ld-card">
+    <div class="ld-grid" aria-hidden="true">
+      <b>1</b><span class="ld-b">A</span><span class="ld-b f" style="--d:0s">B</span><span class="ld-b">C</span><span class="ld-b">D</span>
+      <b>2</b><span class="ld-b">A</span><span class="ld-b">B</span><span class="ld-b">C</span><span class="ld-b f" style="--d:.25s">D</span>
+      <b>3</b><span class="ld-b f" style="--d:.5s">A</span><span class="ld-b">B</span><span class="ld-b">C</span><span class="ld-b">D</span>
+      <b>4</b><span class="ld-b">A</span><span class="ld-b">B</span><span class="ld-b f" style="--d:.75s">C</span><span class="ld-b">D</span>
+    </div>
+    <p class="ld-t">Practical duty allocator</p>
+    <p class="ld-s" id="ldMsg">Getting the duty desk ready…</p>
+    <div class="ld-bar"><i></i></div>
+  </div>
+</div>
+<header class="mast">
+  <div class="wrap">
+    <div class="mast-top">
+      <span>Gujarat University · BCA practical examinations</span>
+      <button class="theme-btn" id="themeBtn" type="button" aria-label="Switch light or dark theme">Theme</button>
+    </div>
+    <h1>Practical duty allocator</h1>
+    <p>Upload the college data and the practical timetable. You get the centre-wise duty sheet in Excel and a duty letter PDF for every examiner.</p>
+    <nav class="rail" aria-label="Progress">
+      <button class="bub" data-go="s1" type="button"><i>1</i>College data</button>
+      <button class="bub" data-go="s2" type="button"><i>2</i>Timetable</button>
+      <button class="bub" data-go="s3" type="button"><i>3</i>Review</button>
+      <button class="bub" data-go="s4" type="button"><i>4</i>Allocate</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- STEP 1 -->
+  <section class="step" id="s1">
+    <div class="step-no">1</div>
+    <div class="step-body">
+      <h2>Upload college data</h2>
+      <p class="lead">The Excel exported from the Google Form responses (Sheets → Download → .xlsx). If a college submitted twice, its latest response is used.</p>
+      <label class="drop" id="drop1">
+        <input type="file" id="file1" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/octet-stream">
+        <strong>Choose the form responses file</strong>
+        <span>or drop it here · .xlsx, .xls or .csv</span>
+      </label>
+      <div class="row-actions">
+        <button class="link-btn" id="demo1" type="button">Try with sample college data</button>
+      </div>
+      <div class="status" id="st1" role="status"></div>
+    </div>
+  </section>
+
+  <!-- STEP 2 -->
+  <section class="step" id="s2">
+    <div class="step-no">2</div>
+    <div class="step-body">
+      <h2>Upload practical timetable</h2>
+      <p class="lead">One row per batch: Date, Centre, Subject Code, Batch, Seat From, Seat To. Download the template, fill it from the programme, and upload it.</p>
+      <label class="drop" id="drop2">
+        <input type="file" id="file2" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/octet-stream">
+        <strong>Choose the timetable file</strong>
+        <span>or drop it here · .xlsx, .xls or .csv</span>
+      </label>
+      <div class="row-actions">
+        <button class="link-btn" id="tplBtn" type="button">Download timetable template</button>
+        <button class="link-btn" id="demo2" type="button">Try with sample timetable</button>
+      </div>
+      <div class="status" id="st2" role="status"></div>
+    </div>
+  </section>
+
+  <!-- STEP 3 -->
+  <section class="step" id="s3">
+    <div class="step-no">3</div>
+    <div class="step-body">
+      <h2>Review centres, examiners and letter details</h2>
+      <p class="lead">Check every centre is linked to the right college, mark the senior examiners, and fill in the letter details once.</p>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true" data-tab="pCentres" type="button">Centres</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="pFaculty" type="button">Examiners</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="pRules" type="button">Allocation rules</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="pLetter" type="button">Letter details</button>
+      </div>
+
+      <div class="panel" id="pCentres" role="tabpanel">
+        <div id="centresBox"><p class="empty">Upload both files to see the centres.</p></div>
+      </div>
+
+      <div class="panel" id="pFaculty" role="tabpanel" hidden>
+        <div class="toolbar">
+          <input type="search" id="facSearch" placeholder="Search name or college" aria-label="Search examiners">
+          <span class="muted" id="facCount"></span>
+        </div>
+        <p class="muted" style="margin:0 0 12px">Tip: in the form data, writing "(S)" after a name marks that faculty as senior automatically.</p>
+        <div id="facultyBox"><p class="empty">Upload college data to see the examiner pool.</p></div>
+      </div>
+
+      <div class="panel" id="pRules" role="tabpanel" hidden>
+        <fieldset>
+          <legend>Examiners per centre</legend>
+          <div class="grid2">
+            <div class="field"><label for="rThr">PC threshold</label><input type="number" id="rThr" min="1" value="80"><small>Centres with fewer PCs get the smaller team.</small></div>
+            <div class="field"><label for="rLs">Below threshold: seniors</label><input type="number" id="rLs" min="0" value="1"></div>
+            <div class="field"><label for="rLj">Below threshold: juniors</label><input type="number" id="rLj" min="0" value="1"></div>
+            <div class="field"><label for="rHs">At or above threshold: seniors</label><input type="number" id="rHs" min="0" value="1"></div>
+            <div class="field"><label for="rHj">At or above threshold: juniors</label><input type="number" id="rHj" min="0" value="2"></div>
+            <div class="field"><label for="rTarget">Preferred duties per examiner</label><input type="number" id="rTarget" min="1" value="2"><small>Gives an examiner this many days before bringing in a new one. 1 spreads duties as widely as possible.</small></div>
+            <div class="field"><label for="rMax">Max duties per examiner</label><input type="number" id="rMax" min="1" value="4"><small>Across the whole programme. Never more than one centre a day.</small></div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Who can be an examiner</legend>
+          <label class="check"><input type="checkbox" id="rSenJun" checked><span>Let seniors fill junior seats when juniors run short</span></label>
+          <p class="muted" style="margin:12px 0 0">Always applied: only faculty who teach that practical are allocated (Python practical duty goes to 353P faculty, PHP practical duty to 355P faculty), no examiner gets a duty at their own college, and nobody gets two centres on the same date. If no subject faculty is left for a seat, the seat stays empty and is listed under items to check.</p>
+        </fieldset>
+      </div>
+
+      <div class="panel" id="pLetter" role="tabpanel" hidden>
+        <fieldset>
+          <legend>Examination</legend>
+          <div class="grid2">
+            <div class="field"><label for="lSem">Semester (as in letter)</label><input type="text" id="lSem" value="Semester V"></div>
+            <div class="field"><label for="lMonth">Exam month and year</label><input type="text" id="lMonth" value="November - 2026"><small>Printed as: Ref. Examination BCA Semester V, November - 2026</small></div>
+            <div class="field"><label for="lBill">Remuneration bill last date</label><input type="text" id="lBill" value="30th November 2026"></div>
+            <div class="field"><label for="lRate">Remuneration per student (Rs.)</label><input type="number" id="lRate" value="15"></div>
+            <div class="field" style="grid-column:1/-1"><label for="lMarks">Guideline 4 (marks)</label><input type="text" id="lMarks" value="There are 70 marks for each practical examination. Distribution of marks is as under: 50 marks for practical and 20 marks for viva-voce on given practical only."></div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Chairperson</legend>
+          <div class="grid2">
+            <div class="field"><label for="cName">Name</label><input type="text" id="cName" value="Dr. Anuradha Sharma"></div>
+            <div class="field"><label for="cCol">College</label><input type="text" id="cCol" value="L.J.C.C.A."></div>
+            <div class="field"><label for="cPh">Phone</label><input type="text" id="cPh" value=""></div>
+            <div class="field"><label for="cMail">Email</label><input type="text" id="cMail" value=""></div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Coordinator</legend>
+          <div class="grid2">
+            <div class="field"><label for="kName">Name</label><input type="text" id="kName" value=""></div>
+            <div class="field"><label for="kCol">College</label><input type="text" id="kCol" value=""></div>
+            <div class="field"><label for="kPh">Phone</label><input type="text" id="kPh" value=""></div>
+            <div class="field"><label for="kMail">Email</label><input type="text" id="kMail" value=""></div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Names used in the letters</legend>
+          <div class="field"><label for="lSubjects">Subjects (code = name, one per line)</label>
+            <textarea id="lSubjects">DSC-C-BCA-353P = Practical Solutions Using Python
+DSC-M-BCA-355P = Web Applications Development using PHP</textarea>
+            <small>Matched by the 3-digit number, so 355P in the timetable finds this line whatever the prefix.</small></div>
+          <div class="field" style="margin-top:14px"><label for="lColleges">College full names (code = name, one per line)</label>
+            <textarea id="lColleges" style="min-height:170px">LJCCA = L.J. College of Computer Applications
+LCCA = Lokmanya College of Computer Application
+AAKMS = AAKMS BCA College, Gandhinagar
+ASIABCA = Asia Pacific BCA College
+SLICA = Som Lalit Institute of Computer Applications
+JGCCA = J.G. College of Computer Applications
+PRSDTBCA = President Institute of Computer Applications
+UMIYABCA = K.D. Patel College of Computer Applications
+PDPICA = Shri P.D. Pandya Institute of Computer Applications
+NAVGUJBCA = Navgujarat BCA College, Gandhinagar
+NGCCA = Navgujarat College of Computer Applications</textarea>
+            <small>Used in the "To" block of each letter. Codes without a line are printed as the code.</small></div>
+        </fieldset>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 4 -->
+  <section class="step" id="s4">
+    <div class="step-no">4</div>
+    <div class="step-body">
+      <h2>Allocate duties</h2>
+      <p class="lead">Run the allocation, check the result, then download. You can change anything in step 3 and run it again.</p>
+      <button class="primary" id="runBtn" type="button" disabled>Allocate duties</button>
+      <span class="busy" id="runBusy">Working…</span>
+      <div style="margin-top:22px">
+        <label class="drop" id="drop3">
+          <input type="file" id="file3" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/octet-stream">
+          <strong>Or upload an edited duty allocation Excel</strong>
+          <span>The Excel downloaded from here, after your changes · letters and duty table are made from it</span>
+        </label>
+        <div class="status" id="st3" role="status"></div>
+      </div>
+      <div id="results" style="margin-top:24px"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">Designed &amp; Developed by: <strong>Parth D. Joshi</strong> (Assistant Professor, LJCCA)</div>
+</footer>
+<div class="sheet-bg" id="sheetBg" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/*CORE-START*/
+const HONOR = /^(prof\.?|dr\.?|mr\.?|mrs\.?|ms\.?|miss|shri|smt\.?)\s+/i;
+function normCode(s){return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');}
+function cleanName(s){
+  let n=String(s||'').replace(/\s+/g,' ').trim();
+  n=n.replace(/^[\-\u2022\d.)\s]+/,'').trim();
+  return n;
+}
+function nameKey(s){let n=cleanName(s).replace(/\((s|sr|senior|j|jr|junior)\)/ig,'').trim(); while(HONOR.test(n)) n=n.replace(HONOR,''); return n.toLowerCase().replace(/[^a-z ]/g,'').replace(/\s+/g,' ').trim();}
+function splitNames(cell){
+  return String(cell||'').split(/[,;\n\/&]|\band\b/i).map(cleanName).filter(x=>x && x.length>1 && !/^(na|n\/a|nil|none|-)$/i.test(x));
+}
+function lev(a,b){const m=a.length,n=b.length;const d=Array.from({length:m+1},(_,i)=>[i]);for(let j=1;j<=n;j++)d[0][j]=j;for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return d[m][n];}
+const MONTHS=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+function parseDate(v){
+  if(v instanceof Date && !isNaN(v)) return new Date(v.getFullYear(),v.getMonth(),v.getDate());
+  if(typeof v==='number' && v>20000 && v<80000){const d=new Date(Math.round((v-25569)*86400000));return new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());}
+  let s=String(v||'').replace(/\(.*?\)/g,' ').replace(/(\d+)(st|nd|rd|th)\b/ig,'$1').replace(/,/g,' ').trim();
+  let m=s.match(/^(\d{1,2})[\s\-\/.]+([A-Za-z]+)[\s\-\/.]+(\d{2,4})$/);
+  if(m){const mi=MONTHS.indexOf(m[2].slice(0,3).toLowerCase());if(mi>=0){let y=+m[3];if(y<100)y+=2000;return new Date(y,mi,+m[1]);}}
+  m=s.match(/^(\d{1,2})[\-\/.](\d{1,2})[\-\/.](\d{2,4})$/);
+  if(m){let y=+m[3];if(y<100)y+=2000;return new Date(y,+m[2]-1,+m[1]);}
+  m=s.match(/^(\d{4})[\-\/.](\d{1,2})[\-\/.](\d{1,2})$/);
+  if(m) return new Date(+m[1],+m[2]-1,+m[3]);
+  return null;
+}
+const DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtShort(d){return String(d.getDate()).padStart(2,'0')+'-'+MON[d.getMonth()]+'-'+String(d.getFullYear()).slice(2);}
+function fmtLong(d){return d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear()+' ('+DAYS[d.getDay()]+')';}
+function dkey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function uniqStudents(rows){const seen=new Map();rows.forEach(r=>{const k=r.ckey+'|'+(r.from&&r.to?r.from+'-'+r.to:r.batch+'|'+r.num+'|'+r.date);if(!seen.has(k))seen.set(k,r.students);});let t=0;seen.forEach(v=>t+=v);return t;}
+function subjNum(code){const m=String(code||'').match(/(\d{3})\s*([PT])?\b/i);return m?m[1]:'';}
+
+/* College data: rows = array of objects keyed by header */
+function parseCollegeRows(rows){
+  if(!rows.length) throw new Error('The file has no rows.');
+  const headers=Object.keys(rows[0]);
+  const find=re=>headers.find(h=>re.test(h));
+  const hCollege=find(/name of (your )?college/i)||find(/college/i);
+  const hStudents=find(/number of students/i)||find(/students/i);
+  const hPcs=find(/computers/i)||find(/\bpcs?\b/i);
+  const hMail=find(/mail/i);
+  const hTime=find(/timestamp/i);
+  if(!hCollege) throw new Error('Could not find the "Name of your College" column.');
+  const facCols=headers.filter(h=>/facult/i.test(h)).map(h=>{
+    const num=subjNum(h); const prac=/\d{3}\s*P\b/i.test(h)||/practical/i.test(h);
+    return {h,num,prac};
+  });
+  if(!facCols.length) throw new Error('No faculty columns found. Expected headers like "Names of Faculty(ies) handling…".');
+  const byCollege=new Map();
+  rows.forEach((r,i)=>{
+    const code=String(r[hCollege]||'').trim(); if(!code) return;
+    const t=hTime?parseTs(r[hTime]):i;
+    const prev=byCollege.get(normCode(code));
+    if(!prev||t>=prev.t) byCollege.set(normCode(code),{t,r,code});
+  });
+  const colleges=[], faculty=new Map();
+  byCollege.forEach(({r,code})=>{
+    const c={code,key:normCode(code),students:+r[hStudents]||0,pcs:+r[hPcs]||0,mail:hMail?String(r[hMail]||'').trim():''};
+    colleges.push(c);
+    facCols.forEach(fc=>{
+      splitNames(r[fc.h]).forEach(raw=>{
+        const k=nameKey(raw)+'|'+c.key; if(!nameKey(raw)) return;
+        const senior=/\((s|sr|senior)\)/i.test(raw);
+        const display=raw.replace(/\s*\((s|sr|senior|j|jr|junior)\)\s*/ig,' ').trim();
+        let f=faculty.get(k);
+        if(!f){f={id:k,name:display,college:code,ckey:c.key,mail:c.mail,subjects:new Set(),pracSubjects:new Set(),senior:false,available:true};faculty.set(k,f);}
+        if(senior) f.senior=true;
+        if(fc.num) f.subjects.add(fc.num);
+        if(fc.prac&&fc.num) f.pracSubjects.add(fc.num);
+      });
+    });
+  });
+  colleges.sort((a,b)=>a.code.localeCompare(b.code));
+  return {colleges,faculty:[...faculty.values()].sort((a,b)=>a.college.localeCompare(b.college)||a.name.localeCompare(b.name))};
+}
+function parseTs(v){if(v instanceof Date) return +v; if(typeof v==='number') return v; const d=Date.parse(v); return isNaN(d)?0:d;}
+
+/* Timetable: long format rows */
+function parseTimetableRows(rows){
+  if(!rows.length) throw new Error('The timetable has no rows.');
+  const headers=Object.keys(rows[0]);
+  const find=re=>headers.find(h=>re.test(h));
+  const hDate=find(/date/i), hCentre=find(/centre|center|college/i), hSub=find(/subject/i), hBatch=find(/batch/i), hFrom=find(/from|start/i), hTo=find(/\bto\b|end/i), hStu=find(/students|count/i);
+  const miss=[[hDate,'Date'],[hCentre,'Centre'],[hSub,'Subject Code']].filter(x=>!x[0]).map(x=>x[1]);
+  if(miss.length) throw new Error('Missing column(s): '+miss.join(', ')+'. Use the template.');
+  const out=[], bad=[];
+  rows.forEach((r,i)=>{
+    const centre=String(r[hCentre]||'').trim(), sub=String(r[hSub]||'').trim();
+    if(!centre&&!sub&&!r[hDate]) return;
+    const d=parseDate(r[hDate]);
+    if(!d||!centre||!sub){bad.push(i+2);return;}
+    const from=hFrom?+r[hFrom]||0:0, to=hTo?+r[hTo]||0:0;
+    const students=hStu&&+r[hStu]?+r[hStu]:(from&&to&&to>=from?to-from+1:0);
+    out.push({date:d,centre,ckey:normCode(centre),subject:sub,num:subjNum(sub),batch:hBatch?String(r[hBatch]||'').trim():'',from,to,students});
+  });
+  if(!out.length) throw new Error('No usable rows. Check the Date, Centre and Subject Code columns.');
+  return {rows:out,bad};
+}
+
+function matchCentres(ttRows,colleges){
+  const map={};
+  const keys=[...new Set(ttRows.map(r=>r.ckey))];
+  keys.forEach(k=>{
+    const name=ttRows.find(r=>r.ckey===k).centre;
+    let c=colleges.find(x=>x.key===k), how=c?'exact':'';
+    if(!c){
+      const strip=s=>s.replace(/BCA$|CCA$|ICA$/,'');
+      c=colleges.find(x=>strip(x.key)&&strip(x.key)===strip(k)); if(c) how='similar';
+    }
+    if(!c){
+      let best=null,bd=99; colleges.forEach(x=>{const d=lev(x.key,k); if(d<bd){bd=d;best=x;}});
+      if(best&&bd<=2){c=best;how='similar';}
+    }
+    map[k]={name,college:c?c.key:'',pcs:c?c.pcs:0,how:c?how:'none'};
+  });
+  return map;
+}
+
+function buildDuties(ttRows){
+  const g=new Map();
+  ttRows.forEach(r=>{
+    const k=dkey(r.date)+'|'+r.ckey+'|'+r.num;
+    let d=g.get(k);
+    if(!d){d={key:k,date:r.date,centre:r.centre,ckey:r.ckey,subject:r.subject,num:r.num,batches:[],students:0};g.set(k,d);}
+    d.batches.push(r); d.students+=r.students;
+  });
+  return [...g.values()].sort((a,b)=>a.date-b.date||a.centre.localeCompare(b.centre)||a.num.localeCompare(b.num));
+}
+
+function hash(s){let h=2166136261;for(const ch of s){h^=ch.charCodeAt(0);h=Math.imul(h,16777619);}return h>>>0;}
+
+function allocate(duties,centreMap,faculty,rules){
+  const pool=faculty.filter(f=>f.available&&f.pracSubjects.size>0);
+  const load=new Map(pool.map(f=>[f.id,0])), busy=new Map(pool.map(f=>[f.id,new Set()]));
+  const warnings=[], result=[];
+  duties.forEach(d=>{
+    const cm=centreMap[d.ckey]||{college:'',pcs:0};
+    const big=(+cm.pcs||0)>=rules.threshold;
+    const needS=big?rules.hiS:rules.loS, needJ=big?rules.hiJ:rules.loJ;
+    const day=dkey(d.date), assigned=[];
+    const subjOf=f=>f.pracSubjects;
+    const eligible=(f,role)=>{
+      if(assigned.some(a=>a.f===f)) return false;
+      if(cm.college&&f.ckey===cm.college) return false;
+      if(f.ckey===d.ckey) return false;
+      if(busy.get(f.id).has(day)) return false;
+      if(load.get(f.id)>=rules.maxDuties) return false;
+      if(role==='S'&&!f.senior) return false;
+      return true;
+    };
+    const rank=(cands)=>cands.sort((a,b)=>{
+      const sa=subjOf(a).has(d.num)?0:1, sb=subjOf(b).has(d.num)?0:1;
+      if(sa!==sb) return sa-sb;
+      const T=Math.max(1,rules.target||1), bk=l=>l>0&&l<T?[0,-l]:l===0?[1,0]:[2,l]; const ba=bk(load.get(a.id)), bb=bk(load.get(b.id)); if(ba[0]!==bb[0]) return ba[0]-bb[0]; if(ba[1]!==bb[1]) return ba[1]-bb[1];
+      const ca=assigned.some(x=>x.f.ckey===a.ckey)?1:0, cb=assigned.some(x=>x.f.ckey===b.ckey)?1:0; if(ca!==cb) return ca-cb;
+      return hash(a.id+d.key)-hash(b.id+d.key);
+    });
+    const pick=(role)=>{
+      let c=pool.filter(f=>eligible(f,role));
+      if(role==='J'){ const jun=c.filter(f=>!f.senior); c=(jun.length||!rules.senJun)?jun:c; }
+      c=c.filter(f=>f.pracSubjects.has(d.num));
+      rank(c); return c[0]||null;
+    };
+    const take=(f,role)=>{assigned.push({f,role});load.set(f.id,load.get(f.id)+1);busy.get(f.id).add(day);};
+    for(let i=0;i<needS;i++){const f=pick('S'); if(f) take(f,'Senior'); else {assigned.push({f:null,role:'Senior'});warnings.push(`${fmtShort(d.date)} · ${d.centre} · ${d.subject}: no senior ${d.num}P faculty available`);}}
+    for(let i=0;i<needJ;i++){const f=pick('J'); if(f) take(f,'Junior'); else {assigned.push({f:null,role:'Junior'});warnings.push(`${fmtShort(d.date)} · ${d.centre} · ${d.subject}: no junior ${d.num}P faculty available`);}}
+    assigned.filter(a=>a.f&&!subjOf(a.f).has(d.num)).forEach(a=>warnings.push(`${fmtShort(d.date)} · ${d.centre}: ${a.f.name} (${a.f.college}) does not teach ${d.num} — placed to fill the seat`));
+    result.push({...d,pcs:+cm.pcs||0,centreCollege:cm.college,big,examiners:assigned});
+  });
+  return {duties:result,warnings,load};
+}
+
+function letterFileName(f,all){
+  const parts=nameKey(f.name).split(' ').filter(Boolean);
+  let base=(parts[0]||'examiner')+'_'+f.college.replace(/[^A-Za-z0-9]/g,'');
+  const clash=all.filter(o=>o!==f&&o.college===f.college&&nameKey(o.name).split(' ')[0]===parts[0]);
+  if(clash.length&&parts[1]) base=parts[0]+'_'+parts[parts.length-1]+'_'+f.college.replace(/[^A-Za-z0-9]/g,'');
+  return base+'.pdf';
+}
+/*CORE-END*/
+
+/* ---------- App state & UI ---------- */
+const S={colleges:[],faculty:[],tt:[],centreMap:{},out:null};
+const $=id=>document.getElementById(id);
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),3200);}
+function status(id,msg,kind){const s=$(id);s.textContent=msg;s.className='status show '+kind;}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+// theme
+(function(){let t=null;try{t=localStorage.getItem('gu-theme');}catch(e){}document.documentElement.dataset.theme=t||'light';
+$('themeBtn').onclick=()=>{const cur=document.documentElement.dataset.theme||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');const n=cur==='dark'?'light':'dark';document.documentElement.dataset.theme=n;try{localStorage.setItem('gu-theme',n);}catch(e){}};})();
+
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>$(b.dataset.go).scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'}));
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',x===t));
+  document.querySelectorAll('.panel').forEach(p=>p.hidden=p.id!==t.dataset.tab);
+});
+
+function markDone(){
+  const d=[S.colleges.length>0,S.tt.length>0,S.colleges.length>0&&S.tt.length>0,!!S.out];
+  ['s1','s2','s3','s4'].forEach((id,i)=>$(id).classList.toggle('done',d[i]));
+  document.querySelectorAll('.bub').forEach((b,i)=>b.classList.toggle('done',d[i]));
+  $('runBtn').disabled=!(S.colleges.length&&S.tt.length);
+}
+
+function readSheet(file){
+  return new Promise((res,rej)=>{
+    if(typeof XLSX==='undefined'){rej(new Error('The spreadsheet library did not load. Check the internet connection and reload.'));return;}
+    const fr=new FileReader();
+    fr.onload=e=>{try{const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true});const ws=wb.Sheets[wb.SheetNames[0]];res(XLSX.utils.sheet_to_json(ws,{defval:'',raw:true}));}catch(err){rej(new Error('Could not read this file. Save it as .xlsx and try again.'));}};
+    fr.onerror=()=>rej(new Error('Could not open the file.'));
+    fr.readAsArrayBuffer(file);
+  });
+}
+function readBook(file){
+  return new Promise((res,rej)=>{
+    if(typeof XLSX==='undefined'){rej(new Error('The spreadsheet library did not load. Check the internet connection and reload.'));return;}
+    const fr=new FileReader();
+    fr.onload=e=>{try{res(XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true}));}catch(err){rej(new Error('Could not read this file. Save it as .xlsx and try again.'));}};
+    fr.onerror=()=>rej(new Error('Could not open the file.'));fr.readAsArrayBuffer(file);
+  });
+}
+function importAllocation(wb){
+  const sheetName=wb.SheetNames.find(n=>/centre.?wise/i.test(n));
+  if(!sheetName) throw new Error('No "Centre-wise Duties" sheet found. Upload the Excel downloaded from this app (keep the sheet and column names).');
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:'',raw:true});
+  const cName=wb.SheetNames.find(n=>/cancel/i.test(n));
+  const cRows=cName?XLSX.utils.sheet_to_json(wb.Sheets[cName],{defval:'',raw:true}).filter(r=>r['Centre']):[];
+  const problems=[],all=[];let added=0;
+  const findFac=(name,college,subNum)=>{
+    const nk=nameKey(name),ck=normCode(college);if(!nk)return null;
+    let f=S.faculty.find(x=>nameKey(x.name)===nk&&(!ck||x.ckey===ck));
+    if(!f&&!ck){const m=S.faculty.filter(x=>nameKey(x.name)===nk);if(m.length===1)f=m[0];else if(m.length>1)problems.push(`${cleanName(name)}: same name at ${m.length} colleges, college taken as ${m[0].college} — add the college column to be sure`),f=m[0];}
+    if(!f){
+      const col=String(college||'').trim()||'UNKNOWN';
+      f={id:nk+'|'+normCode(col),name:cleanName(name),college:col,ckey:normCode(col),mail:'',subjects:new Set(),pracSubjects:new Set(),senior:false,available:true,imported:true};
+      S.faculty.push(f);added++;
+    }
+    if(f.imported&&subNum){f.pracSubjects.add(subNum);f.subjects.add(subNum);}
+    return f;
+  };
+  const mk=(r,cancelled,i)=>{
+    const d0=parseDate(r['Date']),centre=String(r['Centre']||'').trim();
+    if(!d0||!centre){problems.push(`Row ${i+2}: date or centre missing, skipped`);return;}
+    const code=String(r['Subject Code']||r['Subject']||'').trim(),num=subjNum(code);
+    const batches=[];String(r['Batches']||'').split(';').forEach(t=>{const m=t.match(/([^:]+):\s*(\d+)\s*-\s*(\d+)/);if(m)batches.push({batch:m[1].trim(),from:+m[2],to:+m[3]});});
+    const ckey=normCode(centre),cm=S.centreMap[ckey];
+    const remark=String(r['Remarks']||''),mv=remark.match(/Rescheduled from\s+([^;]+)/i);
+    const d={date:d0,origDate:(mv&&parseDate(mv[1].trim()))||d0,centre,ckey,subject:code,num,batches,students:+r['Students']||batches.reduce((a,b)=>a+b.to-b.from+1,0),
+      pcs:+r['PCs']||(cm?+cm.pcs:0),centreCollege:cm&&cm.college?cm.college:ckey,cancelled,edited:/edited/i.test(remark),examiners:[]};
+    d.key=dkey(d.date)+'|'+ckey+'|'+num;
+    for(let k=1;k<=12;k++){
+      if(!(`Examiner ${k}` in r))break;
+      const nm=String(r[`Examiner ${k}`]||'').trim(),lv=/sen/i.test(r[`Examiner ${k} Level`])?'Senior':'Junior';
+      if(!nm&&!String(r[`Examiner ${k} Level`]||'').trim())continue;
+      if(!nm||/not\s*assigned/i.test(nm)){d.examiners.push({f:null,role:lv});continue;}
+      const f=findFac(nm,r[`Examiner ${k} College`],num);
+      if(lv==='Senior'&&f.imported)f.senior=true;
+      d.examiners.push({f,role:lv});
+    }
+    all.push(d);
+  };
+  rows.forEach((r,i)=>mk(r,false,i));
+  cRows.forEach((r,i)=>mk(r,true,i));
+  if(!all.length) throw new Error('No duties found in the "Centre-wise Duties" sheet.');
+  S.out={all,duties:[],warnings:[],examinerList:[],imported:true,importNotes:problems};
+  refresh();renderFaculty();
+  return {n:all.filter(d=>!d.cancelled).length,c:all.filter(d=>d.cancelled).length,added,problems};
+}
+function wireDrop(dropId,inputId,handler){
+  const d=$(dropId),inp=$(inputId);
+  inp.onchange=()=>{const f=inp.files&&inp.files[0];if(f)handler(f);inp.value='';};
+  d.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();inp.click();}});
+  ['dragenter','dragover'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.add('over');}));
+  ['dragleave','drop'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.remove('over');}));
+  d.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)handler(f);});
+}
+function loadColleges(rows,label){
+  try{
+    const {colleges,faculty}=parseCollegeRows(rows);
+    S.colleges=colleges;S.faculty=faculty;S.out=null;
+    const sen=faculty.filter(f=>f.senior).length;
+    status('st1',`${label}: ${colleges.length} colleges, ${faculty.length} faculty found (${sen} marked senior).`,'ok');
+    afterChange();
+  }catch(e){status('st1',e.message,'err');}
+}
+function loadTimetable(rows,label){
+  try{
+    const {rows:tt,bad}=parseTimetableRows(rows);
+    S.tt=tt;S.out=null;
+    const centres=new Set(tt.map(r=>r.ckey)).size, dates=new Set(tt.map(r=>dkey(r.date))).size, stu=uniqStudents(tt);
+    status('st2',`${label}: ${tt.length} batches across ${centres} centres on ${dates} dates, ${stu} students.`+(bad.length?` Skipped rows ${bad.slice(0,8).join(', ')}${bad.length>8?'…':''} (date, centre or subject missing).`:''),bad.length?'err':'ok');
+    afterChange();
+  }catch(e){status('st2',e.message,'err');}
+}
+wireDrop('drop1','file1',async f=>{try{loadColleges(await readSheet(f),f.name);}catch(e){status('st1',e.message,'err');}});
+wireDrop('drop3','file3',async f=>{
+  try{const r=importAllocation(await readBook(f));
+    status('st3',`${f.name}: ${r.n} duties loaded${r.c?`, ${r.c} cancelled`:''}, ${S.out.examinerList.length} examiners.`+(r.added?` ${r.added} examiner name${r.added>1?'s were':' was'} not in the college data — check them in "items to check".`:'')+(r.problems.length?' '+r.problems.slice(0,3).join(' · '):''),r.added||r.problems.length?'err':'ok');
+    $('results').scrollIntoView({behavior:'smooth'});
+  }catch(e){status('st3',e.message,'err');}
+});
+wireDrop('drop2','file2',async f=>{try{loadTimetable(await readSheet(f),f.name);}catch(e){status('st2',e.message,'err');}});
+
+function afterChange(){
+  if(S.colleges.length&&S.tt.length){
+    const old=S.centreMap; S.centreMap=matchCentres(S.tt,S.colleges);
+    Object.keys(S.centreMap).forEach(k=>{if(old[k]&&old[k].manual) S.centreMap[k]=old[k];});
+  }
+  renderCentres();renderFaculty();$('results').innerHTML='';markDone();
+}
+
+function renderCentres(){
+  const box=$('centresBox');
+  if(!(S.colleges.length&&S.tt.length)){box.innerHTML='<p class="empty">Upload both files to see the centres.</p>';return;}
+  const thr=+$('rThr').value||80;
+  const opts=c=>'<option value="">Not linked</option>'+S.colleges.map(x=>`<option value="${esc(x.key)}"${x.key===c?' selected':''}>${esc(x.code)}</option>`).join('');
+  const rows=Object.entries(S.centreMap).sort((a,b)=>a[1].name.localeCompare(b[1].name)).map(([k,m])=>{
+    const stu=uniqStudents(S.tt.filter(r=>r.ckey===k));
+    const dates=[...new Set(S.tt.filter(r=>r.ckey===k).map(r=>fmtShort(r.date)))].join(', ');
+    const chip=m.how==='exact'?'<span class="chip ok">Linked</span>':m.how==='similar'?'<span class="chip warn">Check link</span>':m.how==='manual'?'<span class="chip ok">Set by you</span>':'<span class="chip warn">Not linked</span>';
+    const team=(+m.pcs||0)>=thr?`<span class="chip">${(+$('rHs').value)+(+$('rHj').value)} examiners</span>`:`<span class="chip">${(+$('rLs').value)+(+$('rLj').value)} examiners</span>`;
+    return `<tr><td><strong>${esc(m.name)}</strong><br><span class="muted">${esc(dates)}</span></td>
+      <td><select data-cmap="${esc(k)}" aria-label="College for ${esc(m.name)}">${opts(m.college)}</select></td>
+      <td><input type="number" min="0" value="${+m.pcs||0}" data-cpcs="${esc(k)}" aria-label="PCs at ${esc(m.name)}"></td>
+      <td>${stu}</td><td>${chip} ${team}</td></tr>`;
+  }).join('');
+  box.innerHTML=`<div class="tbl-wrap"><table><thead><tr><th>Timetable centre</th><th>College in form data</th><th>PCs</th><th>Students</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <p class="muted" style="margin-top:10px">The linked college decides the PCs and stops its own faculty from examining there.</p>`;
+  box.querySelectorAll('[data-cmap]').forEach(s=>s.onchange=()=>{const m=S.centreMap[s.dataset.cmap];const c=S.colleges.find(x=>x.key===s.value);m.college=s.value;m.pcs=c?c.pcs:m.pcs;m.how=s.value?'manual':'none';m.manual=true;renderCentres();});
+  box.querySelectorAll('[data-cpcs]').forEach(i=>i.onchange=()=>{const m=S.centreMap[i.dataset.cpcs];m.pcs=+i.value||0;m.manual=true;renderCentres();});
+}
+['rThr','rLs','rLj','rHs','rHj'].forEach(id=>$(id).addEventListener('change',renderCentres));
+
+function renderFaculty(){
+  const box=$('facultyBox');
+  if(!S.faculty.length){box.innerHTML='<p class="empty">Upload college data to see the examiner pool.</p>';$('facCount').textContent='';return;}
+  const q=$('facSearch').value.trim().toLowerCase();
+  const prac=true;
+  const list=S.faculty.filter(f=>(!prac||f.pracSubjects.size>0)&&(!q||f.name.toLowerCase().includes(q)||f.college.toLowerCase().includes(q)));
+  const pool=S.faculty.filter(f=>f.available&&(!prac||f.pracSubjects.size>0));const sen=pool.filter(f=>f.senior).length, jun=pool.length-sen;
+  $('facCount').textContent=`${sen} senior · ${jun} junior in the pool`+(prac?' (practical faculty only)':'');
+  box.innerHTML=`<div class="tbl-wrap"><table><thead><tr><th>Faculty</th><th>Level</th><th>Available</th></tr></thead><tbody>${
+    list.map(f=>`<tr><td><strong>${esc(f.name)}</strong><br><span class="muted">${esc(f.college)}</span> ${[...f.subjects].sort().map(n=>`<span class="chip${f.pracSubjects.has(n)?'':' ok'}">${n}${f.pracSubjects.has(n)?'P':''}</span>`).join('')}</td>
+    <td><span class="seg" role="group" aria-label="Level of ${esc(f.name)}"><button type="button" data-lvl="${esc(f.id)}" data-v="1" aria-pressed="${f.senior}">Sr</button><button type="button" data-lvl="${esc(f.id)}" data-v="0" aria-pressed="${!f.senior}">Jr</button></span></td>
+    <td><input type="checkbox" data-av="${esc(f.id)}" ${f.available?'checked':''} aria-label="${esc(f.name)} available" style="width:22px;height:22px;accent-color:var(--omr)"></td></tr>`).join('')||'<tr><td colspan="3" class="empty">No faculty match this search.</td></tr>'
+  }</tbody></table></div>`;
+  box.querySelectorAll('[data-lvl]').forEach(b=>b.onclick=()=>{const f=S.faculty.find(x=>x.id===b.dataset.lvl);f.senior=b.dataset.v==='1';renderFaculty();});
+  box.querySelectorAll('[data-av]').forEach(c=>c.onchange=()=>{S.faculty.find(x=>x.id===c.dataset.av).available=c.checked;renderFaculty();});
+}
+$('facSearch').addEventListener('input',renderFaculty);
+
+function kvMap(text){const m={};text.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)m[l.slice(0,i).trim()]=l.slice(i+1).trim();});return m;}
+function subjectLabel(code){
+  const m=kvMap($('lSubjects').value), n=subjNum(code);
+  const hit=Object.keys(m).find(k=>subjNum(k)===n);
+  return hit?{code:hit,name:m[hit]}:{code,name:''};
+}
+function collegeFull(code){const m=kvMap($('lColleges').value);const k=Object.keys(m).find(x=>normCode(x)===normCode(code));return k?m[k]:code;}
+function rules(){return{threshold:+$('rThr').value||80,loS:+$('rLs').value||0,loJ:+$('rLj').value||0,hiS:+$('rHs').value||0,hiJ:+$('rHj').value||0,maxDuties:+$('rMax').value||4,target:+$('rTarget').value||1,pracOnly:true,strict:true,senJun:$('rSenJun').checked};}
+
+$('runBtn').onclick=()=>{
+  if(S.out&&S.out.all&&(S.out.imported||S.out.all.some(d=>d.edited))&&!confirm('Allocating again will replace your manual changes, cancellations and reschedules. Continue?'))return;
+  $('runBusy').classList.add('show');
+  setTimeout(()=>{
+    try{
+      const duties=buildDuties(S.tt);
+      const out=allocate(duties,S.centreMap,S.faculty,rules());
+      out.all=out.duties;out.all.forEach(d=>{d.origDate=d.date;d.cancelled=false;d.edited=false;});
+      S.out=out;refresh();
+      $('s4').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+    }catch(e){$('results').innerHTML=`<div class="warnbox">Allocation stopped: ${esc(e.message)}</div>`;}
+    $('runBusy').classList.remove('show');
+  },30);
+};
+
+function renderResults(){
+  const o=S.out, seats=o.duties.reduce((a,d)=>a+d.examiners.length,0), filled=o.duties.reduce((a,d)=>a+d.examiners.filter(e=>e.f).length,0);
+  const byDay=new Map();o.all.forEach(d=>{const k=dkey(d.date);if(!byDay.has(k))byDay.set(k,[]);byDay.get(k).push(d);});
+  let html=`<div class="tally"><div><b>${o.duties.length}</b><span>centre duties</span></div><div><b>${filled}/${seats}</b><span>examiner seats filled</span></div><div><b>${o.examinerList.length}</b><span>examiners receive a letter</span></div><div><b>${new Set(o.duties.map(d=>dkey(d.date))).size}</b><span>exam dates</span></div></div>`;
+  html+=o.warnings.length?`<div class="warnbox"><strong>${o.warnings.length} item${o.warnings.length>1?'s':''} need a look</strong><ul>${o.warnings.slice(0,30).map(w=>`<li>${esc(w)}</li>`).join('')}${o.warnings.length>30?`<li>…and ${o.warnings.length-30} more (all listed in the Excel)</li>`:''}</ul><p style="margin:8px 0 0">Tap Edit on a duty to fix it by hand, or change step 3 and allocate again.</p></div>`:`<div class="okbox">Every examiner seat is filled and all rules are met.</div>`;
+  html+=`<div class="downloads">
+    <button class="primary" id="dlX" type="button">Download duty allocation Excel</button>
+    <button class="secondary" id="dlZ" type="button">Letters as ZIP (one PDF each)</button>
+    <button class="secondary" id="dlA" type="button">All letters in one PDF</button>
+    <button class="secondary" id="dlT" type="button">Duty table PDF for printing</button></div>`;
+  byDay.forEach(list=>{
+    html+=`<h3 class="day-h">${esc(fmtLong(list[0].date))}</h3><div class="tbl-wrap"><table><thead><tr><th>Centre and practical</th><th>Examiners</th></tr></thead><tbody>${
+      list.map(d=>`<tr class="${d.cancelled?'cancelled':''}"><td style="min-width:150px"><strong>${esc(d.centre)}</strong> <span class="muted">${d.pcs} PCs</span><br>${esc(subjectLabel(d.subject).name||d.subject)}<br><span class="muted">${d.students} students · ${d.batches.length} batch${d.batches.length>1?'es':''}</span><br>${d.cancelled?'<span class="chip warn">Cancelled</span>':''}${!d.cancelled&&dkey(d.date)!==dkey(d.origDate)?`<span class="chip">Moved from ${fmtShort(d.origDate)}</span>`:''}${d.edited&&!d.cancelled?'<span class="chip ok">Edited</span>':''} <button class="small-btn" type="button" data-edit="${o.all.indexOf(d)}" style="margin-top:6px">${d.cancelled?'Restore or edit':'Edit'}</button></td>
+      <td style="min-width:150px">${d.examiners.map(e=>e.f?`<span class="ex">${esc(e.f.name)}<br><small>${esc(e.f.college)} · ${e.role}</small></span>`:`<span class="ex"><span class="chip warn">${e.role} seat empty</span></span>`).join('<div style="height:6px"></div>')}</td></tr>`).join('')
+    }</tbody></table></div>`;
+  });
+  html+=`<h3 class="day-h">Letters by examiner</h3><div class="tbl-wrap"><table><thead><tr><th>Examiner</th><th>Duties</th><th>Letter</th></tr></thead><tbody>${
+    o.examinerList.map((f,i)=>{const ds=dutiesOf(f);return `<tr><td><strong>${esc(f.name)}</strong><br><span class="muted">${esc(f.college)} · ${f.senior?'Senior':'Junior'}</span></td><td>${ds.map(d=>`${fmtShort(d.date)} ${esc(d.centre)}`).join('<br>')}</td><td><button class="small-btn" type="button" data-one="${i}">${esc(letterFileName(f,o.examinerList))}</button><br><button class="small-btn" type="button" data-rep="${i}" style="margin-top:6px;color:var(--warn)">Replace in all duties</button></td></tr>`;}).join('')
+  }</tbody></table></div>`;
+  $('results').innerHTML=html;
+  $('dlX').onclick=downloadExcel;$('dlZ').onclick=downloadZip;$('dlA').onclick=downloadAll;$('dlT').onclick=downloadTablePdf;
+  $('results').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEdit(+b.dataset.edit));
+  $('results').querySelectorAll('[data-rep]').forEach(b=>b.onclick=()=>replaceEverywhere(o.examinerList[+b.dataset.rep]));
+  $('results').querySelectorAll('[data-one]').forEach(b=>b.onclick=()=>{const f=o.examinerList[+b.dataset.one];const doc=newDoc();renderLetter(doc,f);saveFile(letterFileName(f,o.examinerList),doc.output('blob'));});
+}
+function dutiesOf(f){return S.out.duties.filter(d=>d.examiners.some(e=>e.f===f));}
+
+/* ---------- Manual editing ---------- */
+function refresh(){
+  const o=S.out;
+  o.all.sort((a,b)=>a.date-b.date||a.centre.localeCompare(b.centre)||a.num.localeCompare(b.num));
+  o.duties=o.all.filter(d=>!d.cancelled);
+  const ids=new Set();o.duties.forEach(d=>d.examiners.forEach(e=>e.f&&ids.add(e.f.id)));
+  o.examinerList=S.faculty.filter(f=>ids.has(f.id));
+  o.warnings=validate();
+  renderResults();markDone();
+}
+function validate(){
+  const r=rules(),w=[],load=new Map(),day=new Map();
+  S.out.duties.forEach(d=>{
+    const lb=`${fmtShort(d.date)} · ${d.centre} · ${d.subject}`;
+    d.examiners.forEach(e=>{
+      if(!e.f){w.push(`${lb}: ${e.role} seat empty`);return;}
+      const f=e.f;
+      if(f.imported){if(!w.includes(`${f.name} (${f.college}) is not in the college data — check spelling and college`))w.push(`${f.name} (${f.college}) is not in the college data — check spelling and college`);}
+      else if(!f.pracSubjects.has(d.num))w.push(`${lb}: ${f.name} does not teach ${d.num}P`);
+      if(f.ckey===d.centreCollege||f.ckey===d.ckey)w.push(`${lb}: ${f.name} is from the centre's own college`);
+      if(e.role==='Senior'&&!f.senior)w.push(`${lb}: ${f.name} is in a senior seat but marked junior`);
+      if(!f.available)w.push(`${lb}: ${f.name} is marked not available`);
+      load.set(f,(load.get(f)||0)+1);const k=f.id+'|'+dkey(d.date);day.set(k,(day.get(k)||[]).concat(d.centre));
+    });
+  });
+  day.forEach((cs,k)=>{if(cs.length>1){const f=S.faculty.find(x=>x.id===k.split('|')[0]);w.push(`${f.name}: ${cs.length} centres on ${fmtShort(parseDate(k.split('|')[1]))} (${cs.join(', ')})`);}});
+  load.forEach((n,f)=>{if(n>r.maxDuties)w.push(`${f.name}: ${n} duties, above the max of ${r.maxDuties}`);});
+  return (S.out.importNotes||[]).concat(w);
+}
+function ruleBreaks(f,d,date,role){
+  const r=rules(),out=[],dk=dkey(date);
+  if(!f.pracSubjects.has(d.num))out.push(`teaches ${[...f.pracSubjects].map(n=>n+'P').join(', ')||'no practical'}`);
+  if(f.ckey===d.centreCollege||f.ckey===d.ckey)out.push('own college');
+  if(S.out.duties.some(x=>x!==d&&dkey(x.date)===dk&&x.examiners.some(e=>e.f===f)))out.push('busy that day');
+  if(S.out.duties.filter(x=>x!==d&&x.examiners.some(e=>e.f===f)).length>=r.maxDuties)out.push('at max duties');
+  if(role==='Senior'&&!f.senior)out.push('marked junior');
+  if(!f.available)out.push('not available');
+  return out;
+}
+function autoPick(d,date,role,takenIds){
+  const r=rules(),T=Math.max(1,r.target||1);
+  const loadOf=f=>S.out.duties.filter(x=>x!==d&&x.examiners.some(e=>e.f===f)).length;
+  let c=S.faculty.filter(f=>f.pracSubjects.size&&!takenIds.has(f.id)&&!ruleBreaks(f,d,date,role).length);
+  if(role!=='Senior'){const j=c.filter(f=>!f.senior);if(j.length||!r.senJun)c=j;}
+  const bk=l=>l>0&&l<T?[0,-l]:l===0?[1,0]:[2,l];
+  c.sort((a,b)=>{const x=bk(loadOf(a)),y=bk(loadOf(b));return x[0]-y[0]||x[1]-y[1]||hash(a.id+d.key)-hash(b.id+d.key);});
+  return c[0]||null;
+}
+let draft=null;
+function openEdit(i){
+  const d=S.out.all[i];
+  draft={i,d,date:d.date,cancelled:d.cancelled,seats:d.examiners.map(e=>({fid:e.f?e.f.id:'',role:e.role}))};
+  renderSheet();$('sheetBg').hidden=false;document.body.style.overflow='hidden';
+}
+function closeSheet(){$('sheetBg').hidden=true;document.body.style.overflow='';draft=null;}
+function renderSheet(){
+  const {d}=draft,sl=subjectLabel(d.subject),pf=S.faculty.filter(f=>f.pracSubjects.size);
+  const taken=new Set(draft.seats.map(x=>x.fid).filter(Boolean));
+  const seatHtml=draft.seats.map((st,k)=>{
+    const cur=S.faculty.find(f=>f.id===st.fid);
+    const ok=[],bad=[];
+    pf.forEach(f=>{if(taken.has(f.id)&&f.id!==st.fid)return;const rb=ruleBreaks(f,d,draft.date,st.role);(rb.length?bad:ok).push([f,rb]);});
+    const opt=([f,rb])=>`<option value="${esc(f.id)}"${f.id===st.fid?' selected':''}>${esc(f.name)} (${esc(f.college)}${f.senior?', Sr':''})${rb.length?' — '+esc(rb.join(', ')):''}</option>`;
+    const why=cur?ruleBreaks(cur,d,draft.date,st.role):[];
+    return `<div class="seat"><select class="role" data-role="${k}" aria-label="Seat ${k+1} level"><option${st.role==='Senior'?' selected':''}>Senior</option><option${st.role==='Junior'?' selected':''}>Junior</option></select>
+      <select data-seat="${k}" aria-label="Examiner for seat ${k+1}"><option value="">Empty seat</option><optgroup label="Suitable">${ok.map(opt).join('')}</optgroup><optgroup label="Breaks a rule">${bad.map(opt).join('')}</optgroup></select>
+      <button class="small-btn" type="button" data-del="${k}" style="color:var(--warn)">Remove</button>
+      ${why.length?`<div class="why">Breaks a rule: ${esc(why.join(', '))}</div>`:''}</div>`;
+  }).join('');
+  $('sheet').innerHTML=`<h3 id="sheetTitle">${esc(d.centre)} · ${esc(sl.name||d.subject)}</h3>
+    <p class="muted" style="margin:0 0 14px">${d.students} students · ${d.batches.length} batches · ${d.pcs} PCs${dkey(d.date)!==dkey(d.origDate)?' · originally '+fmtShort(d.origDate):''}</p>
+    ${draft.cancelled?`<div class="warnbox">This duty is cancelled. It is left out of the Excel, the letters and the duty table.</div>`:''}
+    <div class="field"><label for="edDate">Exam date</label><input type="date" id="edDate" value="${dkey(draft.date)}"${draft.cancelled?' disabled':''}><small>Changing the date reschedules this practical. Examiners busy on the new date are flagged below.</small></div>
+    <div style="margin-top:14px">${seatHtml||'<p class="empty">No examiner seats. Add one below.</p>'}</div>
+    <div class="row-btns"><button class="small-btn" type="button" id="edAdd">Add examiner seat</button><button class="small-btn" type="button" id="edFill">Fill empty seats automatically</button></div>
+    <div class="row-btns"><button class="danger" type="button" id="edCancel">${draft.cancelled?'Restore this duty':'Cancel this duty'}</button></div>
+    <div class="row-btns" style="margin-bottom:0"><button class="primary" type="button" id="edSave">Save changes</button><button class="secondary" type="button" id="edClose">Close without saving</button></div>`;
+  $('edDate').onchange=e=>{const v=e.target.value;if(!v)return;const [y,m,dd]=v.split('-').map(Number);draft.date=new Date(y,m-1,dd);renderSheet();};
+  $('sheet').querySelectorAll('[data-seat]').forEach(x=>x.onchange=()=>{draft.seats[+x.dataset.seat].fid=x.value;renderSheet();});
+  $('sheet').querySelectorAll('[data-role]').forEach(x=>x.onchange=()=>{draft.seats[+x.dataset.role].role=x.value;renderSheet();});
+  $('sheet').querySelectorAll('[data-del]').forEach(x=>x.onclick=()=>{draft.seats.splice(+x.dataset.del,1);renderSheet();});
+  $('edAdd').onclick=()=>{draft.seats.push({fid:'',role:'Junior'});renderSheet();};
+  $('edFill').onclick=()=>{const t=new Set(draft.seats.map(x=>x.fid).filter(Boolean));let n=0;draft.seats.forEach(st=>{if(st.fid)return;const f=autoPick(d,draft.date,st.role,t);if(f){st.fid=f.id;t.add(f.id);n++;}});renderSheet();toast(n?`Filled ${n} seat${n>1?'s':''}`:'No suitable examiner is free for the empty seats');};
+  $('edCancel').onclick=()=>{draft.cancelled=!draft.cancelled;renderSheet();};
+  $('edClose').onclick=closeSheet;
+  $('edSave').onclick=()=>{
+    const moved=dkey(d.date)!==dkey(draft.date),wasC=d.cancelled;
+    d.date=draft.date;d.cancelled=draft.cancelled;d.key=dkey(d.date)+'|'+d.ckey+'|'+d.num;
+    d.examiners=draft.seats.map(st=>({f:S.faculty.find(f=>f.id===st.fid)||null,role:st.role}));
+    d.edited=true;closeSheet();refresh();
+    toast(d.cancelled&&!wasC?'Duty cancelled':!d.cancelled&&wasC?'Duty restored':moved?'Duty rescheduled to '+fmtShort(d.date):'Changes saved');
+  };
+}
+$('sheetBg').addEventListener('click',e=>{if(e.target.id==='sheetBg')closeSheet();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('sheetBg').hidden)closeSheet();});
+function replaceEverywhere(f){
+  const ds=dutiesOf(f);
+  if(!confirm(`Remove ${f.name} from ${ds.length} dut${ds.length>1?'ies':'y'} and give the seats to other examiners? ${f.name} will be marked not available.`))return;
+  f.available=false;let filled=0,empty=0;
+  ds.forEach(d=>{const t=new Set(d.examiners.map(e=>e.f&&e.f.id).filter(Boolean));d.examiners.forEach(e=>{if(e.f!==f)return;e.f=null;const n=autoPick(d,d.date,e.role,t);if(n){e.f=n;t.add(n.id);filled++;}else empty++;});d.edited=true;});
+  renderFaculty();refresh();
+  toast(`${f.name} replaced in ${filled} seat${filled!==1?'s':''}`+(empty?`, ${empty} left empty`:''));
+}
+
+/* ---------- Downloads ---------- */
+async function saveFile(name,blob){
+  let dl=null;
+  try{if(window.claude&&window.claude.use) dl=await window.claude.use('downloads');}catch(e){dl=null;}
+  if(dl){
+    try{await dl.save({filename:name,data:blob});toast('Saved '+name);}
+    catch(e){const c=e&&e.code; if(c==='declined')toast('Download cancelled'); else if(c==='rate_limited')toast('Another download is waiting for confirmation'); else toast('This download is not available here');}
+    return;
+  }
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);toast('Downloaded '+name);
+}
+function stamp(){return ($('lMonth').value||'').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,'');}
+
+function downloadExcel(){
+  const o=S.out, r=rules(), maxEx=Math.max(1,...o.duties.map(d=>d.examiners.length));
+  const centreRows=o.duties.map((d,i)=>{
+    const row={'Sr':i+1,'Date':fmtShort(d.date),'Day':DAYS[d.date.getDay()],'Centre':d.centre,'Centre College':collegeFull(d.centre),'Subject Code':subjectLabel(d.subject).code,'Subject':subjectLabel(d.subject).name||d.subject,
+      'Batches':d.batches.map(b=>`${b.batch||'B'}: ${b.from}-${b.to}`).join('; '),'Students':d.students,'PCs':d.pcs,'Examiners Required':d.examiners.length,'Remarks':[dkey(d.date)!==dkey(d.origDate)?'Rescheduled from '+fmtShort(d.origDate):'',d.edited?'Edited manually':''].filter(Boolean).join('; ')};
+    for(let k=0;k<maxEx;k++){const e=d.examiners[k];row[`Examiner ${k+1}`]=e?(e.f?e.f.name:'NOT ASSIGNED'):'';row[`Examiner ${k+1} Level`]=e?e.role:'';row[`Examiner ${k+1} College`]=e&&e.f?e.f.college:'';}
+    return row;
+  });
+  const facRows=o.examinerList.map((f,i)=>{const ds=dutiesOf(f);const row={'Sr':i+1,'Examiner':f.name,'College':f.college,'Level':f.senior?'Senior':'Junior','Teaches':[...f.pracSubjects].map(n=>n+'P').join(', '),'No. of Duties':ds.length};
+    ds.forEach((d,k)=>{row[`Duty ${k+1}`]=`${fmtShort(d.date)} | ${d.centre} | ${subjectLabel(d.subject).code}`;});
+    row['Letter File']=letterFileName(f,o.examinerList);row['College Mail Id']=f.mail;return row;});
+  const idle=S.faculty.filter(f=>f.available&&(!r.pracOnly||f.pracSubjects.size)&&!o.examinerList.includes(f)).map(f=>({'Faculty':f.name,'College':f.college,'Level':f.senior?'Senior':'Junior'}));
+  const centres=Object.values(S.centreMap).map(m=>({'Centre':m.name,'Linked College':(S.colleges.find(c=>c.key===m.college)||{}).code||'NOT LINKED','PCs':+m.pcs||0,'Category':(+m.pcs||0)>=r.threshold?`${r.threshold}+ PCs`:`Below ${r.threshold} PCs`,'Examiners per Duty':(+m.pcs||0)>=r.threshold?r.hiS+r.hiJ:r.loS+r.loJ}));
+  const wb=XLSX.utils.book_new();
+  const add=(rows,name,widths)=>{const ws=XLSX.utils.json_to_sheet(rows.length?rows:[{'Note':'Nothing to show'}]);if(rows.length)ws['!cols']=Object.keys(rows[0]).map(k=>({wch:widths[k]||Math.min(40,Math.max(10,k.length+2))}));XLSX.utils.book_append_sheet(wb,ws,name);};
+  const how=XLSX.utils.aoa_to_sheet([['Editing this file'],['You can change examiners, levels, colleges, dates and remarks in "Centre-wise Duties", then upload it back in step 4 of the app.'],['Keep the sheet names and column headings as they are.'],['To leave a seat empty, write NOT ASSIGNED in the Examiner column.'],['To cancel a duty, move its row to the "Cancelled Duties" sheet (Date, Centre, Subject, Students).'],['To reschedule, change the Date and write "Rescheduled from dd-Mon-yy" in Remarks.'],['Write the examiner name the same way as in the college data form; fill "Examiner N College" with the college code.']]);how['!cols']=[{wch:110}];
+  add(centreRows,'Centre-wise Duties',{'Centre College':38,'Subject':38,'Batches':40,'Examiner 1':26,'Examiner 2':26,'Examiner 3':26});
+  add(facRows,'Examiner-wise Duties',{'Examiner':28,'Duty 1':34,'Duty 2':34,'Duty 3':34,'Duty 4':34,'Letter File':26,'College Mail Id':32});
+  add(centres,'Centres',{'Centre':20});
+  add(o.warnings.map((w,i)=>({'Sr':i+1,'Item to check':w})),'Items to Check',{'Item to check':90});
+  add(idle,'Not Assigned',{'Faculty':28});
+  add(o.all.filter(d=>d.cancelled).map((d,i)=>({'Sr':i+1,'Date':fmtShort(d.date),'Centre':d.centre,'Subject Code':subjectLabel(d.subject).code,'Subject':subjectLabel(d.subject).name||d.subject,'Batches':d.batches.map(b=>`${b.batch||'B'}: ${b.from}-${b.to}`).join('; '),'Students':d.students,'PCs':d.pcs})),'Cancelled Duties',{'Subject':38});
+  XLSX.utils.book_append_sheet(wb,how,'How to Edit');
+  const buf=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+  saveFile(`Duty_Allocation_BCA_${($('lSem').value||'').replace(/\s+/g,'_')}_${stamp()}.xlsx`,new Blob([buf]));
+}
+
+/* ---------- PDF letters ---------- */
+function newDoc(){return new window.jspdf.jsPDF({unit:'mm',format:'a4'});}
+function semHeading(sem){
+  const m=String(sem).match(/\b(VIII|VII|VI|IV|V|III|II|I|[1-8])\b/i); if(!m) return sem;
+  const R={I:1,II:2,III:3,IV:4,V:5,VI:6,VII:7,VIII:8}; const n=R[m[1].toUpperCase()]||+m[1];
+  return ['First','First','Second','Second','Third','Third','Fourth','Fourth'][n-1]+' Year Semester-'+n;
+}
+/* '*' toggles bold, '_' toggles underline */
+function segs(str){const out=[];let b=false,u=false,buf='';for(const ch of str){if(ch==='*'||ch==='_'){if(buf)out.push({t:buf,b,u});buf='';if(ch==='*')b=!b;else u=!u;}else buf+=ch;}if(buf)out.push({t:buf,b,u});return out;}
+function rich(doc,str,x,y,w,size,lh,justify){
+  doc.setFontSize(size);
+  const font=bd=>doc.setFont('times',bd?'bold':'normal');
+  font(false);const sw=doc.getTextWidth(' ');
+  const toks=[];let sp=false;
+  segs(str).forEach(sg=>sg.t.split(/(\s+)/).forEach(tk=>{if(!tk)return;if(/^\s+$/.test(tk)){sp=true;return;}font(sg.b);toks.push({t:tk,b:sg.b,u:sg.u,sp:sp&&toks.length>0,w:doc.getTextWidth(tk)});sp=false;}));
+  const lines=[];let cur=[],cw=0;
+  toks.forEach(t=>{let gap=cur.length&&t.sp?sw:0;if(cur.length&&cw+gap+t.w>w){lines.push({toks:cur,w:cw});cur=[];cw=0;gap=0;}t.gap=gap;cur.push(t);cw+=gap+t.w;});
+  if(cur.length)lines.push({toks:cur,w:cw});
+  lines.forEach((ln,i)=>{
+    if(y>282){doc.addPage();y=22;}
+    const n=ln.toks.filter(t=>t.gap).length, per=justify&&i<lines.length-1&&n?(w-ln.w)/n:0;
+    let xx=x,prev=null;
+    ln.toks.forEach(t=>{const g=t.gap?t.gap+per:0;const start=xx;xx+=g;font(t.b);doc.text(t.t,xx,y);
+      if(t.u){doc.setLineWidth(0.25);doc.line(prev&&prev.u&&g?start:xx,y+0.9,xx+t.w,y+0.9);}
+      xx+=t.w;prev=t;});
+    y+=lh;
+  });
+  return y;
+}
+function guidelines(){
+  const bill=$('lBill').value;
+  return [
+    'This time University Practical Examinations are centralized i.e students will have practical examination center according to their University Seat Number.',
+    'You are requested to see the detailed timetable on Gujarat University Website.',
+    '*It is the moral responsibility of the faculty members not to evaluate students from his/her college at their centre.*',
+    [$('lMarks').value,"*Note: The Viva should be strictly related to the practical definition assigned to the candidate. This Viva is to be conducted at the candidate's desk.*"],
+    '*Candidate is not required to produce the journal at the time of practical but they have to produce their Hall Tickets at the time of Exam.*',
+    "*Candidates' Hall Ticket must be checked by the _College Lab Assistant or Exam Incharge_ and _not by any of the Practical examiners_ before circulating question papers by Examiners.*",
+    '*Examiners will not ask anything about the identity of the students.*',
+    'The answer sheets of the candidates must have university seat no., signature of both examiners, practical definition, program solution (or print out) and print outs of outputs (if any) along with the marks obtained by the student.',
+    '*The final practical marksheet and attendance report will be provided by the examination centre.*',
+    "The final practical marks statement and attendance report duly signed by examiners in a sealed envelope, answer books in a separate sealed envelope and *_extra question papers_* of practical's in a sealed envelope should be handed over to the college authority which *they will forward to the Exam department of Gujarat University or to the University observers.*",
+    'Examiners are required to write clearly the marks in the specific formats of the mark sheets provided for practical examination. If the candidate is absent clearly mark *"Absent"*. Please do not leave the marks column *BLANK* in any case. Colleges/ Institutes should prepare in advance the copies of mark sheets as per the format supplied.',
+    'Examiners are required to report *at least 30 minutes before* the commencement of the examination at the center. Examiners should strictly adhere to the date, time and the center allotted to them.',
+    'The Examiners should submit the TA/DA Bill duly signed by the Principal/Director of the Exam Center, to the Accounts department of Gujarat University.',
+    '*Examiners are requested to use mobiles sparingly* only for urgent communication during the exam hours.',
+    `The remuneration bills *along with the copy of your duty letter* should be verified and signed by the chairperson or coordinators and then submitted to Accounts department directly by the examiner before *${bill}.*`
+  ];
+}
+function renderLetter(doc,f){
+  const W=210,L=30,R=184,TW=R-L,sem=$('lSem').value,month=$('lMonth').value,ds=dutiesOf(f),lh=5.4;
+  const T=(t,x,yy,st,opt)=>{doc.setFont('times',st||'normal');doc.text(t,x,yy,opt||{});};
+  doc.setFontSize(12);
+  let y=24;
+  T('GUJARAT UNIVERSITY',W/2,y,'bold',{align:'center'});y+=lh;
+  T('Ahmedabad - 380009',W/2,y,'bold',{align:'center'});y+=11;
+  T('Confidential',L,y,'bold');y+=10;
+  T(`Ref. Examination BCA ${sem}, ${month}`,L,y);y+=14;
+  T('To',L,y);y+=lh;T(f.name,L,y);y+=lh;T(collegeFull(f.college),L,y);y+=16;
+  doc.setFont('times','bolditalic');
+  let s=doc.splitTextToSize(`Subject: Practical Examination of BCA ${sem}, ${month} to be conducted by Gujarat University.`,TW);doc.text(s,L,y);y+=s.length*lh+8;
+  T('Dear Sir/ Madam,',L,y);y+=10;
+  y=rich(doc,`You are requested to conduct the Practical Examination for BCA ${sem} as per the following Schedule.`,L,y,TW,12,lh,true)+2;
+  const tw=[30,30,72], tx=(W-(tw[0]+tw[1]+tw[2]))/2;
+  doc.autoTable({startY:y,margin:{left:tx,right:W-tx-tw[0]-tw[1]-tw[2]},head:[['Date','College','Subject']],
+    body:ds.map(d=>[fmtShort(d.date),d.centre,subjectLabel(d.subject).name||d.subject]),
+    theme:'grid',styles:{font:'times',fontSize:11,cellPadding:{top:0.9,bottom:0.9,left:2,right:2},textColor:0,lineColor:0,lineWidth:0.25,halign:'center',valign:'middle'},
+    headStyles:{fillColor:false,textColor:0,fontStyle:'bold'},columnStyles:{0:{cellWidth:tw[0]},1:{cellWidth:tw[1]},2:{cellWidth:tw[2]}}});
+  y=doc.lastAutoTable.finalY+8;
+  y=rich(doc,'You may get the required stationery from the institute where you are conducting the Practical. You are requested to see the guidelines given on the next page for practical examination evaluation. It may be noted that for BCA Practical Examinations, the Chairperson and Coordinators are:',L,y,TW,12,lh,true)+6;
+  const col=(x,lines)=>{let yy=y;lines.filter(Boolean).forEach(t=>{T(t,x,yy,'bold');yy+=lh;});return yy;};
+  const y1=col(L,[$('cName').value,$('cCol').value,$('cPh').value?'Phone : '+$('cPh').value:'',$('cMail').value]);
+  const y2=$('kName').value?col(132,[$('kName').value,$('kCol').value,$('kPh').value?'Phone : '+$('kPh').value:'',$('kMail').value]):y;
+  y=Math.max(y1,y2)+12;
+  T('Yours faithfully,',L,y);y+=30;
+  T('By Order',L,y);y+=lh;T('Controller of Examination, Gujarat University, Ahmedabad.',L,y);
+
+  doc.addPage();y=18;const L2=24,TW2=188-L2;
+  doc.setFont('helvetica','bold');doc.setFontSize(14);doc.text('GUJARAT UNIVERSITY',W/2,y,{align:'center'});y+=8;
+  y=rich(doc,`*_General guidelines for Computer Practical Examinations of Gujarat University at ${semHeading(sem)}_*`,L2,y,TW2,11,4.8,false)+2;
+  const gs=10,glh=4.3;
+  guidelines().forEach((g,i)=>{
+    const paras=Array.isArray(g)?g:[g];
+    if(y>278){doc.addPage();y=20;}
+    doc.setFontSize(gs);doc.setFont('times',String(paras[0]).startsWith('*')?'bold':'normal');doc.text(`${i+1}.`,L2+1,y);
+    paras.forEach((para,j)=>{y=rich(doc,para,L2+8,y,TW2-8,gs,glh,true);if(j<paras.length-1)y+=1.6;});
+    y+=1.6;
+  });
+  y+=3;
+  const rows=Math.max(2,ds.length);
+  if(y+10+rows*9+10>292){doc.addPage();y=22;}
+  doc.autoTable({startY:y,margin:{left:42,right:W-42-128},head:[['S.no','Date','College','No. of students evaluated']],
+    body:Array.from({length:rows},()=>['','','','']),
+    theme:'grid',styles:{font:'times',fontSize:12,textColor:0,lineColor:0,lineWidth:0.3,minCellHeight:9,halign:'center',valign:'middle'},
+    headStyles:{fillColor:false,textColor:0,fontStyle:'bold'},columnStyles:{0:{cellWidth:20},1:{cellWidth:24},2:{cellWidth:46},3:{cellWidth:38}}});
+  y=doc.lastAutoTable.finalY+7;
+  T(`Total Amount = No. of students x ${+$('lRate').value||15} Rs.`,56,y,'normal');
+}
+function downloadTablePdf(){
+  const o=S.out;if(!o){toast('Allocate duties first.');return;}
+  const doc=new window.jspdf.jsPDF({unit:'mm',format:'a4',orientation:'landscape'}),W=297,sem=$('lSem').value,month=$('lMonth').value;
+  let y=14;doc.setFont('times','bold');doc.setFontSize(14);doc.text('GUJARAT UNIVERSITY',W/2,y,{align:'center'});
+  y+=6;doc.setFontSize(11.5);doc.text(`BCA ${sem} Practical Examination, ${month}`,W/2,y,{align:'center'});
+  y+=5.5;doc.setFont('times','normal');doc.text('Centre-wise Examiner Duty Allocation',W/2,y,{align:'center'});y+=4;
+  const body=[];let last='',sr=0;
+  o.duties.forEach(d=>{
+    const k=dkey(d.date);
+    if(k!==last){last=k;body.push([{content:fmtLong(d.date),colSpan:7,styles:{fillColor:[242,242,242],fontStyle:'bold',halign:'left',fontSize:10.5}}]);}
+    const sl=subjectLabel(d.subject);
+    body.push([++sr,d.centre,(sl.name||d.subject)+'\n('+sl.code+')',
+      d.batches.map(b=>(b.batch||'Batch')+(b.from?`: ${b.from} to ${b.to}`:'')).join('\n'),d.students,d.pcs,
+      d.examiners.map((e,i)=>`${i+1}. `+(e.f?`${e.f.name} (${e.f.college}) - ${e.role}`:`NOT ASSIGNED - ${e.role}`)).join('\n')]);
+  });
+  doc.autoTable({startY:y,margin:{left:12,right:12,bottom:14},showHead:'everyPage',
+    head:[['Sr','Centre','Practical','Batches / Seat Nos.','Students','PCs','Examiners (College - Level)']],body,
+    theme:'grid',styles:{font:'times',fontSize:9.5,textColor:0,lineColor:0,lineWidth:0.2,cellPadding:1.8,valign:'top'},
+    headStyles:{fillColor:[225,225,225],textColor:0,fontStyle:'bold',valign:'middle'},
+    columnStyles:{0:{cellWidth:10,halign:'center'},1:{cellWidth:26,fontStyle:'bold'},2:{cellWidth:52},3:{cellWidth:44},4:{cellWidth:18,halign:'center'},5:{cellWidth:14,halign:'center'}},
+    didDrawPage:()=>{doc.setFont('times','normal');doc.setFontSize(8.5);doc.text('Generated on '+fmtShort(new Date()),12,203);doc.text('Page '+doc.internal.getNumberOfPages(),W-12,203,{align:'right'});}});
+  y=doc.lastAutoTable.finalY+20;if(y>192){doc.addPage();y=30;}
+  doc.setFont('times','bold');doc.setFontSize(11);doc.text('Chairperson',W-20,y,{align:'right'});
+  if($('cName').value){doc.setFont('times','normal');doc.text($('cName').value,W-20,y+5,{align:'right'});}
+  saveFile(`Duty_Table_BCA_${(sem||'').replace(/\s+/g,'_')}_${stamp()}.pdf`,doc.output('blob'));
+}
+async function downloadZip(){
+  if(typeof JSZip==='undefined'){toast('The ZIP library did not load. Reload and try again.');return;}
+  $('runBusy').classList.add('show');
+  const zip=new JSZip(), list=S.out.examinerList;
+  list.forEach(f=>{const doc=newDoc();renderLetter(doc,f);zip.file(letterFileName(f,list),doc.output('arraybuffer'));});
+  const blob=await zip.generateAsync({type:'blob'});
+  $('runBusy').classList.remove('show');
+  saveFile(`Duty_Letters_BCA_${($('lSem').value||'').replace(/\s+/g,'_')}_${stamp()}.zip`,blob);
+}
+function downloadAll(){
+  const list=S.out.examinerList;if(!list.length){toast('No examiners were assigned.');return;}
+  const doc=newDoc();list.forEach((f,i)=>{if(i)doc.addPage();renderLetter(doc,f);});
+  saveFile(`All_Duty_Letters_BCA_${($('lSem').value||'').replace(/\s+/g,'_')}_${stamp()}.pdf`,doc.output('blob'));
+}
+
+/* ---------- Template & sample data ---------- */
+const SAMPLE_TT=[
+ ['18-11-2026','ASIABCA','DSC-M-BCA-355P',[[1,60],[61,120]]],['18-11-2026','JGCCA','DSC-M-BCA-355P',[[121,170],[171,220]]],['18-11-2026','LCCA','DSC-M-BCA-355P',[[221,290],[291,360]]],['18-11-2026','LJCCA','DSC-M-BCA-355P',[[361,480],[481,600],[601,720]]],
+ ['18-11-2026','PDPICA','DSC-C-BCA-353P',[[721,800],[801,880],[881,960]]],['18-11-2026','PRSTDBCA','DSC-C-BCA-353P',[[961,1020],[1021,1080]]],['18-11-2026','SLICA','DSC-C-BCA-353P',[[1081,1150],[1151,1220],[1221,1290]]],['18-11-2026','UMIYABCA','DSC-C-BCA-353P',[[1291,1355],[1356,1420]]],
+ ['19-11-2026','ASIABCA','DSC-C-BCA-353P',[[1,60],[61,120]]],['19-11-2026','JGCCA','DSC-C-BCA-353P',[[121,170],[171,220]]],['19-11-2026','LCCA','DSC-C-BCA-353P',[[221,290],[291,360]]],['19-11-2026','LJCCA','DSC-C-BCA-353P',[[361,480],[481,600],[601,720]]],
+ ['19-11-2026','PDPICA','DSC-M-BCA-355P',[[721,800],[801,880],[881,960]]],['19-11-2026','PRSTDBCA','DSC-M-BCA-355P',[[961,1020],[1021,1080]]],['19-11-2026','SLICA','DSC-M-BCA-355P',[[1081,1150],[1151,1220],[1221,1290]]],['19-11-2026','UMIYABCA','DSC-M-BCA-355P',[[1291,1355],[1356,1420]]],
+ ['20-11-2026','NGCCA','DSC-C-BCA-353P',[[1421,1540],[1541,1660],[1661,1774]]],['20-11-2026','CCCA','DSC-M-BCA-355P',[[1775,1844],[1845,1914],[1915,1984]]],['20-11-2026','NAVGUJBCA','DSC-C-BCA-353P',[[1985,2054],[2055,2124],[2125,2185]]],
+ ['21-11-2026','NGCCA','DSC-M-BCA-355P',[[1421,1540],[1541,1660],[1661,1774]]],['21-11-2026','CCCA','DSC-C-BCA-353P',[[1775,1844],[1845,1914],[1915,1984]]],['21-11-2026','NAVGUJBCA','DSC-M-BCA-355P',[[1985,2054],[2055,2124],[2125,2185]]]
+];
+function sampleTTRows(){const out=[];SAMPLE_TT.forEach(([d,c,s,bs])=>bs.forEach(([a,b],i)=>out.push({'Date':d,'Centre':c,'Subject Code':s,'Batch':'B'+(i+1),'Seat From':a,'Seat To':b})));return out;}
+function sampleCollegeRows(){
+  const first=['Mohit','Pruthvi','Janvi','Disha','Dhara','Jadav','Dhyey','Bhavesh','Meet','Hasnain','Yash','Prit'];
+  const last=['Shah','Patel','Mehta','Desai','Trivedi','Parmar','Joshi','Vyas','Pandya','Raval','Dave','Solanki','Bhatt','Rana'];
+  const cols=[['LJCCA',120],['LCCA',70],['AAKMS',60],['KBCA',72],['ASIABCA',60],['KHYATIBCA',45],['KIBCA',85],['NAVGUJBCA',70],['NGCCA',120],['PDPICA',80],['PRSDTBCA',60],['SLICA',70],['UCCA',140],['GOVTBCA',40],['JGCCA',50],['UMIYABCA',65],['CCCA',70],['S P Mahilla College',58]];
+  let n=0;const nm=()=>{const f=first[n%first.length],l=last[(n*5+Math.floor(n/12))%last.length];n++;return `Prof. ${f} ${l}`;};
+  return cols.map(([c,pc],i)=>{const p1=nm(),p2=nm(),h1=nm(),h2=nm();return{
+    'Timestamp':new Date(2026,8,18+(i%6),10+(i%7),(i*7)%60),'Name of your College':c,'Total Number of Students in Semester 5':Math.round(pc*2.2),
+    'Total Number of Computers for the practical examination to be conducted. (Please give the maximum number)':pc,
+    'Names of Faculty(ies) handling the subject of DSC-C-BCA-351T : System Analysis: Design & Development':nm(),
+    'Names of Faculty(ies) handling the subject of DSC-C-BCA-352 T : Problem Solving Using Python':p1,
+    'Names of Faculty(ies) handling the subject of DSC-C-BCA-353 P : Practical Solutions Using Python':`${p1} (S), ${p2}`,
+    'Names of Faculty(ies) handling the subject of DSC-M-BCA-354 T : Foundation of Mathematical Applications':nm(),
+    'Names of Faculty(ies) handling the subject of DSC-M-BCA-355 P : Web Applications Development using PHP':`${h1}${i%3===0?' (S)':''}, ${h2}`,
+    'Names of subject offered in SEC-356':'Digital Marketing Tools','Name of the faculty(ies) handling the subject of SEC-356':nm(),
+    'Mail Id for examination related communication':`exam.${c.split(' ')[0].toLowerCase()}@example.edu.in`};});
+}
+$('demo1').onclick=()=>loadColleges(sampleCollegeRows(),'Sample college data');
+$('demo2').onclick=()=>loadTimetable(sampleTTRows(),'Sample timetable');
+$('tplBtn').onclick=()=>{
+  if(typeof XLSX==='undefined'){toast('The spreadsheet library did not load. Reload and try again.');return;}
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.json_to_sheet(sampleTTRows().slice(0,4));ws['!cols']=[{wch:14},{wch:14},{wch:18},{wch:8},{wch:10},{wch:10}];
+  XLSX.utils.book_append_sheet(wb,ws,'Timetable');
+  const help=XLSX.utils.aoa_to_sheet([['How to fill'],['One row per batch. Replace the example rows.'],['Date: dd-mm-yyyy (or a real Excel date)'],['Centre: college code exactly as in the form, e.g. LJCCA'],['Subject Code: e.g. DSC-C-BCA-353P'],['Batch: B1, B2, B3'],['Seat From / Seat To: seat number range of that batch']]);
+  help['!cols']=[{wch:64}];XLSX.utils.book_append_sheet(wb,help,'How to fill');
+  saveFile('Practical_Timetable_Template.xlsx',new Blob([XLSX.write(wb,{bookType:'xlsx',type:'array'})]));
+};
+markDone();
+(function(){
+  const t0=performance.now(), ld=$('loader');
+  const msgs=['Getting the duty desk ready…','Loading spreadsheet tools…','Preparing letter templates…'];
+  let k=0; const mi=setInterval(()=>{k=(k+1)%msgs.length;$('ldMsg').textContent=msgs[k];},900);
+  const hide=()=>{if(ld.classList.contains('gone'))return;clearInterval(mi);ld.classList.add('gone');setTimeout(()=>ld.remove(),600);};
+  const done=()=>setTimeout(hide,Math.max(0,1800-(performance.now()-t0)));
+  if(document.readyState==='complete')done(); else window.addEventListener('load',done);
+  setTimeout(hide,7000);
+})();
+</script>
+</body>
+</html>
+
+</body></html>
